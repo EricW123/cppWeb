@@ -1,9 +1,9 @@
 #include <iostream>
 #include <sys/socket.h>
-#include <netdb.h>
+#include <netinet/in.h>
 #include <unistd.h>
 #include <cstring>
-#include <arpa/inet.h>
+#include <thread>
 
 #include "webber.hpp"
 
@@ -33,6 +33,18 @@ void Response::send(const char* data) {
 
 Webber::Webber() {
     // Constructor
+    this->sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (this->sock == -1) {
+        std::cerr << "Error creating socket" << std::endl;
+        return;
+    }
+
+    int opt = 1;
+    if (setsockopt(this->sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+        std::cerr << "setsockopt failed" << std::endl;
+        return;
+    }
+
 }
 
 Webber::~Webber() {
@@ -43,44 +55,72 @@ void Webber::get(const char* path, void (*callback)(Request*, Response*)) {
     // Get method
 }
 
-void Webber::listen(int port) {
-    // Listen method
-    
-    int status;
-    struct addrinfo hints;
-    struct addrinfo *servinfo;  // will point to the results
-    struct addrinfo *p;  // temporary pointer
+void Webber::post(const char* path, void (*callback)(Request*, Response*)) {
+    // Post method
+}
 
-    memset(&hints, 0, sizeof hints); // make sure the struct is empty
-    hints.ai_family = AF_UNSPEC;     // don't care IPv4 or IPv6
-    hints.ai_socktype = SOCK_STREAM; // TCP stream sockets
-    hints.ai_flags = AI_PASSIVE;     // fill in my IP for me
-    char ipstr[INET6_ADDRSTRLEN];
+void Webber::start_client(int client) {
+    // Handle client method
+    while (true) {
+        char buffer[1024] = {0};
+        std::cout << client << ": Waiting for data..." << std::endl;
+        read(client, buffer, 1024);
+        std::cout << client << ": ========================================" << std::endl;
+        std::cout << client << ": Received: " << buffer << std::endl;
+        std::cout << client << ": ========================================" << std::endl;
 
+        std::string response = "HTTP/1.1 200 OK\nContent-Type: text/html\nConnection: keep-alive\n\n<html><h3>Please stop!</h3></html>";
+        send(client, response.c_str(), response.size(), 0);
 
-    if ((status = getaddrinfo("www.google.com", NULL, &hints, &servinfo)) != 0) {
-        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
+        if (strstr(buffer, "Connection: keep-alive") == NULL)
+            break;
+    }
+    close(client);
+}
+
+void Webber::start_server(int port) {
+    // Handle server method
+    struct sockaddr_in server;
+    server.sin_family = AF_INET;
+    server.sin_port = htons(port);
+    server.sin_addr.s_addr = INADDR_ANY;
+    this->server = server;
+
+    if (bind(this->sock, (struct sockaddr*)&server, sizeof(server)) == -1) {
+        std::cerr << "Error binding socket" << std::endl;
         return;
     }
+    std::cout << "Socket bound" << std::endl;
 
-    for(p = servinfo; p != NULL; p = p->ai_next) {
-        void *addr;
-        char *ipver;
-
-        // get the pointer to the address itself,
-        // different fields in IPv4 and IPv6:
-        if (p->ai_family == AF_INET) { // IPv4
-            struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;
-            addr = &(ipv4->sin_addr);
-            ipver = "IPv4";
-        } else { // IPv6
-            struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)p->ai_addr;
-            addr = &(ipv6->sin6_addr);
-            ipver = "IPv6";
-        }
-
-        // convert the IP to a string and print it:
-        inet_ntop(p->ai_family, addr, ipstr, sizeof ipstr);
-        printf("  %s: %s\n", ipver, ipstr);
+    if (::listen(this->sock, port) == -1) {
+        std::cerr << "Error listening on socket" << std::endl;
+        return;
     }
+    std::cout << "Listening on port 3000" << std::endl;
+
+    while (true) {
+        int addr_len = sizeof(this->server);
+        int client = accept(this->sock, nullptr, nullptr);
+
+        if (client == -1) {
+            std::cerr << "Error accepting connection" << std::endl;
+            return;
+        }
+        std::cout << "Client connected: " << client << std::endl;
+
+        std::thread client_t(&Webber::start_client, this, client);
+        client_t.detach();
+
+        sleep(0.1);
+    }
+}
+
+void Webber::listen(int port) {
+    // Listen method
+    std::thread server_t(&Webber::start_server, this, port);
+    server_t.join();
+
+    close(this->sock);
+
+    std::cout << "Server closed" << std::endl;
 }
