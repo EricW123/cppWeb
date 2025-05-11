@@ -1,6 +1,7 @@
 #include <iostream>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <cstring>
 #include <thread>
@@ -60,22 +61,82 @@ void Webber::post(const char* path, void (*callback)(Request*, Response*)) {
 }
 
 void Webber::start_client(int client) {
+    /*
     // Handle client method
+    int never_received = true;
     while (true) {
         char buffer[1024] = {0};
+        while (never_received) {
+            fd_set readfds;
+            FD_ZERO(&readfds);
+            FD_SET(client, &readfds);
+
+            struct timeval timeout;
+            timeout.tv_sec = 3;
+            timeout.tv_usec = 0;
+
+            int ret = select(client + 1, &readfds, NULL, NULL, &timeout);
+            if (ret == -1) {
+                std::cerr << "Error selecting" << std::endl;
+                close(client);
+                return;
+            } else if (ret == 0) {
+                std::cout << client << ": Timeout" << std::endl;
+                close(client);
+                return;
+            } else {
+                break;
+            }
+        }
+        never_received = false;
         std::cout << client << ": Waiting for data..." << std::endl;
-        read(client, buffer, 1024);
+        int res = read(client, buffer, 1024);
+        if (res <= 0) {
+            std::cerr << client << ": Error reading data" << std::endl;
+            close(client);
+            return;
+        }
         std::cout << client << ": ========================================" << std::endl;
         std::cout << client << ": Received: " << buffer << std::endl;
         std::cout << client << ": ========================================" << std::endl;
 
-        std::string response = "HTTP/1.1 200 OK\nContent-Type: text/html\nConnection: keep-alive\n\n<html><h3>Please stop!</h3></html>";
+        std::string response = "HTTP/1.1 200 OK\nContent-Type: text/html\nConnection: close\n\n<html><h3>Please stop!</h3></html>";
         send(client, response.c_str(), response.size(), 0);
 
         if (strstr(buffer, "Connection: keep-alive") == NULL)
             break;
+        // }
     }
     close(client);
+    */
+    char buffer[1024] = {0};
+    int res = recv(client, buffer, 1024, 0);
+    if (res == 0) {
+        // recv() returns 0 means socket is disconnected by peer
+        // Browser may send 2-3 TCP requests when accessing a page,
+        // some of them are just empty and will send FIN as soon as received SYN-ACK
+        // just ignore them.
+        std::cout << client << ": disconnected by peer" << std::endl;
+        close(client);
+        return;
+    }
+    if (res < 0) {
+        // Only when recv() returns -1 means error.
+        // check errno code for error detail.
+        std::cout << client << ": reading failed" << std::endl;
+        close(client);
+        return;
+    }
+
+    std::cout << client << ": ========================================" << std::endl;
+    std::cout << client << ": Received: " << buffer;
+    std::cout << client << ": ========================================" << std::endl;
+
+    std::string response = "HTTP/1.1 200 OK\nContent-Type: text/html\nConnection: keep-alive\n\n<html><h3>Please stop!</h3></html>";
+    send(client, response.c_str(), response.size(), 0);
+
+    close(client);
+    std::cout << client << ": disconnected" << std::endl;
 }
 
 void Webber::start_server(int port) {
@@ -99,7 +160,6 @@ void Webber::start_server(int port) {
     std::cout << "Listening on port 3000" << std::endl;
 
     while (true) {
-        int addr_len = sizeof(this->server);
         int client = accept(this->sock, nullptr, nullptr);
 
         if (client == -1) {
@@ -110,8 +170,7 @@ void Webber::start_server(int port) {
 
         std::thread client_t(&Webber::start_client, this, client);
         client_t.detach();
-
-        sleep(0.1);
+        sleep(2);
     }
 }
 
