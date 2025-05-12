@@ -1,2 +1,2 @@
 main:
-	g++ main.cpp webber.cpp -o webber
+	g++ -std=c++11 main.cpp webber.cpp -o webber.out

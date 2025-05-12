@@ -5,13 +5,87 @@
 #include <unistd.h>
 #include <cstring>
 #include <thread>
+#include <sstream>
 
 #include "webber.hpp"
 
 using namespace webber;
 
-Request::Request() {
+Request::Request(std::string request) {
     // Constructor
+    std::istringstream request_stream(request);
+    std::string line;
+    std:getline(request_stream, line);
+    
+    std::string method;
+
+    std::istringstream line_stream(line);
+    // std::cout << request << std::endl;
+    line_stream >> method >> this->path >> this->version;
+
+    if (method.compare("GET") == 0) {
+        this->method = HTTPMethod::GET;
+    } else if (method.compare("POST") == 0) {
+        this->method = HTTPMethod::POST;
+    } else if (method.compare("PUT") == 0) {
+        this->method = HTTPMethod::PUT;
+    } else if (method.compare("DELETE") == 0) {
+        this->method = HTTPMethod::DELETE;
+    } else if (method.compare("HEAD") == 0) {
+        this->method = HTTPMethod::HEAD;
+    } else if (method.compare("OPTIONS") == 0) {
+        this->method = HTTPMethod::OPTIONS;
+    } else if (method.compare("PATCH") == 0) {
+        this->method = HTTPMethod::PATCH;
+    } else {
+        this->method = HTTPMethod::UNKNOWN;
+    }
+
+    std::unordered_map<HTTPMethod, std::string> method_to_string = {
+        {HTTPMethod::GET, "iGET"},
+        {HTTPMethod::POST, "POST"},
+        {HTTPMethod::PUT, "PUT"},
+        {HTTPMethod::DELETE, "DELETE"},
+        {HTTPMethod::HEAD, "HEAD"},
+        {HTTPMethod::OPTIONS, "OPTIONS"},
+        {HTTPMethod::PATCH, "PATCH"},
+        {HTTPMethod::UNKNOWN, "UNKNOWN"}
+    };
+    std::cout << "Method: " << method_to_string[this->method] << std::endl;
+    std::cout << "Path: " << this->path << std::endl;
+    std::cout << "Version: " << this->version << std::endl;
+
+    bool is_header = true;
+    while (std::getline(request_stream, line)) {
+        // the socket will receive a `\r\n` as the first line
+        // so `if (line == '\r') break;` won't work since it will break at the first line
+        if (line.empty()) break;
+        if (line.back() == '\r') line.pop_back();
+        if (line.empty()) { is_header = false; continue; }
+
+        if (is_header) {
+            size_t pos = line.find(':');
+            if (pos != std::string::npos) {
+                std::string key = line.substr(0, pos);
+                std::string value = line.substr(pos + 1);
+                if (value.front() == ' ') value.erase(0, 1); // remove leading space
+                this->headers[key] = value;
+            }
+        } else {
+            // body
+            this->_body += line;
+        }
+    }
+
+    // std::cout << "Headers:" << std::endl;
+    // for (auto header : this->headers) {
+    //     std::cout << header.first << ": " << header.second << std::endl;
+    // }
+}
+
+std::string Request::body() {
+    // Body method
+    return this->_body;
 }
 
 Request::~Request() {
@@ -19,16 +93,24 @@ Request::~Request() {
 }
 
 
-Response::Response() {
+Response::Response(int client_fd) {
     // Constructor
+    this->client_fd = client_fd;
 }
 
 Response::~Response() {
     // Destructor
 }
 
-void Response::send(const char* data) {
+void Response::send(const std::string msg) {
     // Send method
+    std::string data = 
+        "HTTP/1.1 200 OK\n"
+        "Content-Type: text/html\n"
+        "Content-Length: " + std::to_string(msg.size()) + "\n"
+        "Connection: keep-alive\n"
+        "\n" + msg;
+    ::send(this->client_fd, data.c_str(), data.size(), 0);
 }
 
 
@@ -40,103 +122,66 @@ Webber::Webber() {
         return;
     }
 
-    int opt = 1;
+    int opt = 1;    // allow reuse of address and port
     if (setsockopt(this->sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
         std::cerr << "setsockopt failed" << std::endl;
         return;
     }
-
 }
 
 Webber::~Webber() {
     // Destructor
 }
 
-void Webber::get(const char* path, void (*callback)(Request*, Response*)) {
+void Webber::get(const std::string path, void (*callback)(Request*, Response*)) {
     // Get method
+    this->routes[path][HTTPMethod::GET] = callback;
 }
 
-void Webber::post(const char* path, void (*callback)(Request*, Response*)) {
+void Webber::post(const std::string path, void (*callback)(Request*, Response*)) {
     // Post method
+    this->routes[path][HTTPMethod::POST] = callback;
 }
 
 void Webber::start_client(int client) {
-    /*
-    // Handle client method
-    int never_received = true;
+    std::string buffer(1024, 0);
     while (true) {
-        char buffer[1024] = {0};
-        while (never_received) {
-            fd_set readfds;
-            FD_ZERO(&readfds);
-            FD_SET(client, &readfds);
-
-            struct timeval timeout;
-            timeout.tv_sec = 3;
-            timeout.tv_usec = 0;
-
-            int ret = select(client + 1, &readfds, NULL, NULL, &timeout);
-            if (ret == -1) {
-                std::cerr << "Error selecting" << std::endl;
-                close(client);
-                return;
-            } else if (ret == 0) {
-                std::cout << client << ": Timeout" << std::endl;
-                close(client);
-                return;
-            } else {
-                break;
-            }
-        }
-        never_received = false;
-        std::cout << client << ": Waiting for data..." << std::endl;
-        int res = read(client, buffer, 1024);
-        if (res <= 0) {
-            std::cerr << client << ": Error reading data" << std::endl;
-            close(client);
-            return;
-        }
-        std::cout << client << ": ========================================" << std::endl;
-        std::cout << client << ": Received: " << buffer << std::endl;
-        std::cout << client << ": ========================================" << std::endl;
-
-        std::string response = "HTTP/1.1 200 OK\nContent-Type: text/html\nConnection: close\n\n<html><h3>Please stop!</h3></html>";
-        send(client, response.c_str(), response.size(), 0);
-
-        if (strstr(buffer, "Connection: keep-alive") == NULL)
+        // buffer.data() returns a `const void*` before C++17, but `recv()` needs a `void*` pointer
+        // in C++17 or higher, can use `recv(client, buffer.data(), buffer.size(), 0);`
+        ssize_t res = recv(client, &buffer[0], buffer.size(), 0);
+        if (res == 0) {
+            // recv() returns 0 means socket is disconnected by peer
+            // Browser may send 2-3 TCP requests when accessing a page,
+            // some of them are just empty and will send FIN as soon as received SYN-ACK
+            // just ignore them.
+            std::cout << client << ": disconnected by peer" << std::endl;
             break;
-        // }
+        }
+        if (res < 0) {
+            // Only when recv() returns -1 means error, positive means data received, and 0 means disconnected by peer
+            std::cerr << client << ": reading failed" << std::endl;
+            break;
+        }
+
+        auto func = [](Request& req, Response& res) {
+            // Callback function
+            res.send("<h3>Hello Worlx!</h3>");
+        };
+
+        Request request(buffer);
+        Response response(client);
+        
+        this->routes[request.path][request.method](&request, &response);
+        
+        if (buffer.find("Connection: close") != std::string::npos) {
+            // If the client sends a request with "Connection: close", close the connection
+            std::cout << client << ": disconnected by client" << std::endl;
+            break;
+        }
     }
+    
     close(client);
-    */
-    char buffer[1024] = {0};
-    int res = recv(client, buffer, 1024, 0);
-    if (res == 0) {
-        // recv() returns 0 means socket is disconnected by peer
-        // Browser may send 2-3 TCP requests when accessing a page,
-        // some of them are just empty and will send FIN as soon as received SYN-ACK
-        // just ignore them.
-        std::cout << client << ": disconnected by peer" << std::endl;
-        close(client);
-        return;
-    }
-    if (res < 0) {
-        // Only when recv() returns -1 means error.
-        // check errno code for error detail.
-        std::cout << client << ": reading failed" << std::endl;
-        close(client);
-        return;
-    }
-
-    std::cout << client << ": ========================================" << std::endl;
-    std::cout << client << ": Received: " << buffer;
-    std::cout << client << ": ========================================" << std::endl;
-
-    std::string response = "HTTP/1.1 200 OK\nContent-Type: text/html\nConnection: keep-alive\n\n<html><h3>Please stop!</h3></html>";
-    send(client, response.c_str(), response.size(), 0);
-
-    close(client);
-    std::cout << client << ": disconnected" << std::endl;
+    std::cout << client << ": socket closed" << std::endl;
 }
 
 void Webber::start_server(int port) {
@@ -153,24 +198,23 @@ void Webber::start_server(int port) {
     }
     std::cout << "Socket bound" << std::endl;
 
-    if (::listen(this->sock, port) == -1) {
+    if (::listen(this->sock, SOMAXCONN) == -1) {
         std::cerr << "Error listening on socket" << std::endl;
         return;
     }
     std::cout << "Listening on port 3000" << std::endl;
 
     while (true) {
-        int client = accept(this->sock, nullptr, nullptr);
+        ssize_t client = accept(this->sock, nullptr, nullptr);
 
         if (client == -1) {
             std::cerr << "Error accepting connection" << std::endl;
             return;
         }
-        std::cout << "Client connected: " << client << std::endl;
+        std::cout << "New client connected: " << client << std::endl;
 
         std::thread client_t(&Webber::start_client, this, client);
         client_t.detach();
-        sleep(2);
     }
 }
 
