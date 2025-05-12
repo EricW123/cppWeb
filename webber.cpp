@@ -80,7 +80,7 @@ Request::Request(std::string request) {
 
     std::cout << "-- Request Headers --" << std::endl;
     for (auto header : this->headers) {
-        std::cout << header.first << ": " << header.second << std::endl;
+        std::cout << "\t" << header.first << ": " << header.second << std::endl;
     }
     std::cout << "-- End of Headers --" << std::endl;
 }
@@ -167,12 +167,12 @@ Webber::~Webber() {
     // Destructor
 }
 
-void Webber::get(const std::string path, void (*callback)(Request*, Response*)) {
+void Webber::get(const std::string path, callback_t callback) {
     // Get method
     this->routes[path][HTTPMethod::GET] = callback;
 }
 
-void Webber::post(const std::string path, void (*callback)(Request*, Response*)) {
+void Webber::post(const std::string path, callback_t callback) {
     // Post method
     this->routes[path][HTTPMethod::POST] = callback;
 }
@@ -202,7 +202,7 @@ void Webber::start_client(int client) {
         
         if (this->routes.find(request.path) != this->routes.end() &&
             this->routes[request.path].find(request.method) != this->routes[request.path].end()) {
-            this->routes[request.path][request.method](&request, &response);
+            this->routes[request.path][request.method](request, response);
             continue;
         }
         

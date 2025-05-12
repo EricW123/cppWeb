@@ -19,7 +19,6 @@ namespace webber {
         UNKNOWN
     };
 
-    
     class Request {
         public:
             Request(std::string);
@@ -46,19 +45,21 @@ namespace webber {
             int client_fd;
     };
 
+    typedef void (*callback_t) (Request&, Response&);
+    
     class Webber {
         public:
             Webber();
             ~Webber();
-            void get(const std::string path, void (*callback)(Request*, Response*));
-            void post(const std::string path, void (*callback)(Request*, Response*));
+            void get(const std::string path, callback_t callback);
+            void post(const std::string path, callback_t callback);
             void listen(int port);
         
         private:
             int sock;
             struct ::sockaddr_in server;
             std::unordered_map<std::string,
-                std::unordered_map<HTTPMethod, void (*)(Request*, Response*)>> routes;
+                std::unordered_map<HTTPMethod, callback_t>> routes;
 
             void start_server(int port);
             void start_client(int client);
