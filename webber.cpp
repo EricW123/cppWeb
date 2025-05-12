@@ -200,39 +200,32 @@ void Webber::start_client(int client) {
         Request request(buffer);
         Response response(client);
         
-        if (this->routes.find(request.path) == this->routes.end()) {
-            // If path not found in routes, try find it in ./public folder
-            std::string public_path = "./public" + request.path;
-            if (request.path == "/") {
-                public_path = "./public/index.html";
-            }
-            std::ifstream file(public_path);
-            if (file.is_open()) {
-                std::cout << client << ": file found" << std::endl;
-                response.render(public_path);
-                file.close();
-                break;
-            }
-
+        if (this->routes.find(request.path) != this->routes.end() &&
+            this->routes[request.path].find(request.method) != this->routes[request.path].end()) {
+            this->routes[request.path][request.method](&request, &response);
+            continue;
+        }
+        
+        std::string public_path = "./public" + request.path;
+        if (request.path == "/")
+            public_path = "./public/index.html";
+        std::ifstream file(public_path);
+        if (file.is_open()) {
+            response.render(public_path);
+            file.close();
+        } else {
             // Still not found, send 404
             std::cerr << client << ": route not found" << std::endl;
             response.send("<h3>404 Not Found</h3>");
-            break;
         }
-        if (this->routes[request.path].find(request.method) == this->routes[request.path].end()) {
-            std::cerr << client << ": method not found" << std::endl;
-            response.send("<h3>405 Method Not Allowed</h3>");
-            break;
-        }
-        this->routes[request.path][request.method](&request, &response);
-        
+
         if (buffer.find("Connection: close") != std::string::npos) {
             // If the client sends a request with "Connection: close", close the connection
             std::cout << client << ": disconnected by client" << std::endl;
             break;
         }
     }
-    
+
     close(client);
     std::cout << client << ": socket closed" << std::endl;
 }
