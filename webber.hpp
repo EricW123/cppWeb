@@ -41,6 +41,7 @@ namespace webber {
             Response(int);
             ~Response();
             void send(const std::string data);
+            void render(const std::string filename);
         private:
             int client_fd;
     };

@@ -6,6 +6,7 @@
 #include <cstring>
 #include <thread>
 #include <sstream>
+#include <fstream>
 
 #include "webber.hpp"
 
@@ -77,10 +78,11 @@ Request::Request(std::string request) {
         }
     }
 
-    // std::cout << "Headers:" << std::endl;
-    // for (auto header : this->headers) {
-    //     std::cout << header.first << ": " << header.second << std::endl;
-    // }
+    std::cout << "-- Request Headers --" << std::endl;
+    for (auto header : this->headers) {
+        std::cout << header.first << ": " << header.second << std::endl;
+    }
+    std::cout << "-- End of Headers --" << std::endl;
 }
 
 std::string Request::body() {
@@ -110,7 +112,39 @@ void Response::send(const std::string msg) {
         "Content-Length: " + std::to_string(msg.size()) + "\n"
         "Connection: keep-alive\n"
         "\n" + msg;
-    ::send(this->client_fd, data.c_str(), data.size(), 0);
+    ssize_t total_sent = 0;
+    while (total_sent < data.size()) {
+        ssize_t sent = ::send(this->client_fd, data.data() + total_sent, data.size() - total_sent, 0);
+        std::cout << sent << " bytes sent." << std::endl;
+        if (sent == -1) {
+            std::cerr << "Error sending data" << std::endl;
+            break;
+        }
+        if (sent == 0) break;
+        total_sent += sent;
+    }
+    // ::send(this->client_fd, data.c_str(), data.size(), 0);
+}
+
+
+void Response::render(const std::string filename) {
+    std::ifstream file_stream(filename);
+    std::string file;
+    std::string line;
+
+    if (!file_stream.is_open()) {
+        std::cerr << "Error opening file: " << filename << std::endl;
+        return;
+    }
+
+    while (std::getline(file_stream, line)) {
+        // Read file line by line
+        file += line + "\n";
+    }
+
+    file_stream.close();
+
+    send(file);
 }
 
 
@@ -163,14 +197,33 @@ void Webber::start_client(int client) {
             break;
         }
 
-        auto func = [](Request& req, Response& res) {
-            // Callback function
-            res.send("<h3>Hello Worlx!</h3>");
-        };
-
         Request request(buffer);
         Response response(client);
         
+        if (this->routes.find(request.path) == this->routes.end()) {
+            // If path not found in routes, try find it in ./public folder
+            std::string public_path = "./public" + request.path;
+            if (request.path == "/") {
+                public_path = "./public/index.html";
+            }
+            std::ifstream file(public_path);
+            if (file.is_open()) {
+                std::cout << client << ": file found" << std::endl;
+                response.render(public_path);
+                file.close();
+                break;
+            }
+
+            // Still not found, send 404
+            std::cerr << client << ": route not found" << std::endl;
+            response.send("<h3>404 Not Found</h3>");
+            break;
+        }
+        if (this->routes[request.path].find(request.method) == this->routes[request.path].end()) {
+            std::cerr << client << ": method not found" << std::endl;
+            response.send("<h3>405 Method Not Allowed</h3>");
+            break;
+        }
         this->routes[request.path][request.method](&request, &response);
         
         if (buffer.find("Connection: close") != std::string::npos) {
