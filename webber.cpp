@@ -16,12 +16,13 @@ Request::Request(std::string request) {
     // Constructor
     std::istringstream request_stream(request);
     std::string line;
-    std:getline(request_stream, line);
+    std::getline(request_stream, line);
     
     std::string method;
 
+    // The first line ends with `\n`, so use getline to capture the whole line before parsing.
+    // Otherwise the `\n` will be remained to later header lines and cause parsing error.
     std::istringstream line_stream(line);
-    // std::cout << request << std::endl;
     line_stream >> method >> this->path >> this->version;
 
     if (method.compare("GET") == 0) {
@@ -112,7 +113,7 @@ void Response::send(const std::string msg) {
         "Content-Length: " + std::to_string(msg.size()) + "\n"
         "Connection: keep-alive\n"
         "\n" + msg;
-    ssize_t total_sent = 0;
+    size_t total_sent = 0;
     while (total_sent < data.size()) {
         ssize_t sent = ::send(this->client_fd, data.data() + total_sent, data.size() - total_sent, 0);
         std::cout << sent << " bytes sent." << std::endl;
@@ -126,14 +127,12 @@ void Response::send(const std::string msg) {
     // ::send(this->client_fd, data.c_str(), data.size(), 0);
 }
 
-
-void Response::render(const std::string filename) {
-    std::ifstream file_stream(filename);
+void Response::render(std::ifstream& file_stream) {
     std::string file;
     std::string line;
 
     if (!file_stream.is_open()) {
-        std::cerr << "Error opening file: " << filename << std::endl;
+        std::cerr << "Error opening file stream" << std::endl;
         return;
     }
 
@@ -144,7 +143,12 @@ void Response::render(const std::string filename) {
 
     file_stream.close();
 
-    send(file);
+    this->send(file);
+}
+
+void Response::render(const std::string filename) {
+    std::ifstream file_stream(filename);
+    this->render(file_stream);
 }
 
 
@@ -167,12 +171,12 @@ Webber::~Webber() {
     // Destructor
 }
 
-void Webber::get(const std::string path, callback_t callback) {
+void Webber::get(const std::string path, router_func_t callback) {
     // Get method
     this->routes[path][HTTPMethod::GET] = callback;
 }
 
-void Webber::post(const std::string path, callback_t callback) {
+void Webber::post(const std::string path, router_func_t callback) {
     // Post method
     this->routes[path][HTTPMethod::POST] = callback;
 }
@@ -181,7 +185,7 @@ void Webber::start_client(int client) {
     std::string buffer(1024, 0);
     while (true) {
         // buffer.data() returns a `const void*` before C++17, but `recv()` needs a `void*` pointer
-        // in C++17 or higher, can use `recv(client, buffer.data(), buffer.size(), 0);`
+        // In C++17 or higher, can use `recv(client, buffer.data(), buffer.size(), 0);`
         ssize_t res = recv(client, &buffer[0], buffer.size(), 0);
         if (res == 0) {
             // recv() returns 0 means socket is disconnected by peer
@@ -210,8 +214,8 @@ void Webber::start_client(int client) {
         if (request.path == "/")
             public_path = "./public/index.html";
         std::ifstream file(public_path);
-        if (file.is_open()) {
-            response.render(public_path);
+        if (request.method == HTTPMethod::GET && file.good()) {
+            response.render(file);
             file.close();
         } else {
             // Still not found, send 404

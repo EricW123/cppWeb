@@ -4,9 +4,11 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unordered_map>
+#include <fstream>
+#include <functional>
 
 namespace webber {
-    enum class HTTPMethod {
+    enum HTTPMethod {
         GET,    // requests a representation of the specified resource
         POST,   // submits an entity to the specified resource
         PUT,    // replaces all current representations of the target resource with the request content
@@ -30,7 +32,7 @@ namespace webber {
             std::string path;
             std::string version;
             std::unordered_map<std::string, std::string> headers;
-            std::string _body;
+            std::string _body;  // same name with member method body()
 
         friend class Webber;
     };
@@ -41,25 +43,37 @@ namespace webber {
             ~Response();
             void send(const std::string data);
             void render(const std::string filename);
+            void render(std::ifstream& file);
         private:
             int client_fd;
     };
 
-    typedef void (*callback_t) (Request&, Response&);
-    
+    using router_func_t = std::function<void(Request&, Response&)>;
+
+    class Middleware {
+    public:
+        std::function<void(Request&, Response&)> func;
+        Middleware* next = nullptr;
+        void operator()(void);
+    private:
+        Request& req;
+        Response& res;
+    };
+
     class Webber {
         public:
             Webber();
             ~Webber();
-            void get(const std::string path, callback_t callback);
-            void post(const std::string path, callback_t callback);
+            void get(const std::string path, router_func_t callback);
+            void post(const std::string path, router_func_t callback);
             void listen(int port);
         
         private:
             int sock;
             struct ::sockaddr_in server;
             std::unordered_map<std::string,
-                std::unordered_map<HTTPMethod, callback_t>> routes;
+                std::unordered_map<HTTPMethod, router_func_t>> routes;
+            Middleware* middlewares = nullptr;
 
             void start_server(int port);
             void start_client(int client);
