@@ -6,6 +6,9 @@
 #include <unordered_map>
 #include <fstream>
 #include <functional>
+#include <vector>
+#include <string>
+
 
 namespace webber {
     enum HTTPMethod {
@@ -41,42 +44,43 @@ namespace webber {
         public:
             Response(int);
             ~Response();
-            void send(const std::string data);
-            void render(const std::string filename);
-            void render(std::ifstream& file);
+            void send(const std::string data, std::string content_type = "text/html");
+            void render(const std::string filename, std::string content_type = "text/html");
+            void render(std::ifstream& file, std::string content_type = "text/html");
         private:
             int client_fd;
     };
 
+    using vvfunc_t = std::function<void()>;
     using router_func_t = std::function<void(Request&, Response&)>;
-
-    class Middleware {
-    public:
-        std::function<void(Request&, Response&)> func;
-        Middleware* next = nullptr;
-        void operator()(void);
-    private:
-        Request& req;
-        Response& res;
-    };
+    using middleware_func_t = std::function<void(Request&, Response&, vvfunc_t)>;
 
     class Webber {
         public:
             Webber();
             ~Webber();
+            void use(middleware_func_t func);
             void get(const std::string path, router_func_t callback);
             void post(const std::string path, router_func_t callback);
             void listen(int port);
-        
+
+            void runMidd();
+
         private:
             int sock;
             struct ::sockaddr_in server;
             std::unordered_map<std::string,
-                std::unordered_map<HTTPMethod, router_func_t>> routes;
-            Middleware* middlewares = nullptr;
+                std::unordered_map<HTTPMethod, middleware_func_t>> routes;
+            Request request = Request("");
+            Response response = Response(0);
+            std::vector<middleware_func_t> middlewares;
+            int temp = 0;
+            size_t current_midd = 0;
 
             void start_server(int port);
             void start_client(int client);
+            void nextMidd(void);
+            middleware_func_t getNextMidd(void);
     };
 }
 

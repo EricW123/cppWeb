@@ -79,11 +79,11 @@ Request::Request(std::string request) {
         }
     }
 
-    std::cout << "-- Request Headers --" << std::endl;
-    for (auto header : this->headers) {
-        std::cout << "\t" << header.first << ": " << header.second << std::endl;
-    }
-    std::cout << "-- End of Headers --" << std::endl;
+    // std::cout << "-- Request Headers --" << std::endl;
+    // for (auto header : this->headers) {
+    //     std::cout << "\t" << header.first << ": " << header.second << std::endl;
+    // }
+    // std::cout << "-- End of Headers --" << std::endl;
 }
 
 std::string Request::body() {
@@ -105,29 +105,34 @@ Response::~Response() {
     // Destructor
 }
 
-void Response::send(const std::string msg) {
-    // Send method
+void Response::send(const std::string msg, std::string content_type) {
+    // Wrap message with HTTP headers, send to frontend
+    bool keep_alive = false;
+    // TODO: keep-alive may cause bug: browser mess up with multiple files received
+    // and consider received js file as css file
+    // so keep-alive is disabled for now
     std::string data = 
-        "HTTP/1.1 200 OK\n"
-        "Content-Type: text/html\n"
-        "Content-Length: " + std::to_string(msg.size()) + "\n"
-        "Connection: keep-alive\n"
-        "\n" + msg;
-    size_t total_sent = 0;
-    while (total_sent < data.size()) {
-        ssize_t sent = ::send(this->client_fd, data.data() + total_sent, data.size() - total_sent, 0);
-        std::cout << sent << " bytes sent." << std::endl;
-        if (sent == -1) {
-            std::cerr << "Error sending data" << std::endl;
-            break;
-        }
-        if (sent == 0) break;
-        total_sent += sent;
-    }
-    // ::send(this->client_fd, data.c_str(), data.size(), 0);
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: " + content_type + "\r\n"
+        "Content-Length: " + std::to_string(msg.size()) + "\r\n"
+        "Connection: " + (keep_alive ? "keep-alive" : "close") + "\r\n"
+        "\r\n" + msg;
+    // No need to splite data into chunks if size <= ~1MB
+    // size_t total_sent = 0;
+    // while (total_sent < data.size()) {
+    //     ssize_t sent = ::send(this->client_fd, data.data() + total_sent, data.size() - total_sent, 0);
+    //     std::cout << sent << " bytes sent." << std::endl;
+    //     if (sent == -1) {
+    //         std::cerr << "Error sending data" << std::endl;
+    //         break;
+    //     }
+    //     if (sent == 0) break;
+    //     total_sent += sent;
+    // }
+    ::send(this->client_fd, data.data(), data.size(), 0);
 }
 
-void Response::render(std::ifstream& file_stream) {
+void Response::render(std::ifstream& file_stream, std::string content_type) {
     std::string file;
     std::string line;
 
@@ -138,17 +143,18 @@ void Response::render(std::ifstream& file_stream) {
 
     while (std::getline(file_stream, line)) {
         // Read file line by line
-        file += line + "\n";
+        file += line + "\r\n";
     }
 
     file_stream.close();
 
-    this->send(file);
+    this->send(file, content_type);
+    // sleep(1);    // for testing keep-alive
 }
 
-void Response::render(const std::string filename) {
+void Response::render(const std::string filename, std::string content_type) {
     std::ifstream file_stream(filename);
-    this->render(file_stream);
+    this->render(file_stream, content_type);
 }
 
 
@@ -173,12 +179,50 @@ Webber::~Webber() {
 
 void Webber::get(const std::string path, router_func_t callback) {
     // Get method
-    this->routes[path][HTTPMethod::GET] = callback;
+    middleware_func_t mw = [path, callback](Request& req, Response& res, vvfunc_t next) {
+        if (req.method == HTTPMethod::GET && req.path == path) {
+            callback(req, res);
+        } else {
+            // If the method is not GET, call the next middleware
+            if (next) next();
+        }
+    };
+    this->middlewares.push_back(mw);
 }
 
 void Webber::post(const std::string path, router_func_t callback) {
     // Post method
-    this->routes[path][HTTPMethod::POST] = callback;
+    middleware_func_t mw = [path, callback](Request& req, Response& res, vvfunc_t next) {
+        if (req.method == HTTPMethod::POST && req.path == path) {
+            callback(req, res);
+        } else {
+            // If the method is not POST, call the next middleware
+            if (next) next();
+        }
+    };
+    this->middlewares.push_back(mw);
+}
+
+void Webber::nextMidd() {
+    middleware_func_t mw = this->getNextMidd();
+    if (mw == nullptr) return;
+    mw(this->request, this->response, [this]() { this->nextMidd(); });
+}
+
+void Webber::use(middleware_func_t middleware) {
+    // TODO: app.use() register middlewares to front part
+    // app.get() register to second part
+    // other default handlers register to last part
+    // (req,res) |->app.use()->|->app.get()->|->default routers->|->404 Not Found |
+    // but user should be able to use app.use() and app.get() at any order
+    // currently the order of the middlewares is not guaranteed yet.
+    this->middlewares.push_back(middleware);
+};
+
+middleware_func_t Webber::getNextMidd() {
+    if (this->middlewares.size() == 0) return nullptr;
+    if (this->current_midd >= this->middlewares.size()) return nullptr;
+    return this->middlewares[this->current_midd++];
 }
 
 void Webber::start_client(int client) {
@@ -201,27 +245,41 @@ void Webber::start_client(int client) {
             break;
         }
 
-        Request request(buffer);
-        Response response(client);
+        this->request = Request(buffer);
+        this->response = Response(client);
+
+        middleware_func_t default_route = [](Request& req, Response& res, vvfunc_t next) {
+            std::string public_path = "./public" + req.path;
+            if (req.path == "/")
+                public_path = "./public/index.html";
+            std::cout << "Public path: " << public_path << std::endl;
+            std::ifstream file(public_path);
+            if (req.method == HTTPMethod::GET && file.good()) {
+                if (req.path.find(".css") != std::string::npos) {
+                    res.render(file, "text/css");
+                } else if (req.path.find(".js") != std::string::npos) {
+                    res.render(file, "text/javascript");
+                } else if (req.path.find(".html") != std::string::npos) {
+                    res.render(file, "text/html");
+                } else {
+                    res.render(file);
+                }
+                file.close();
+            } else {
+                if (next) next();
+            }
+        };
+        this->middlewares.push_back(default_route);
+
+        middleware_func_t error_route = [](Request& req, Response& res, vvfunc_t next) {
+            res.send("<h3>404 Not Found</h3>");
+        };
+        this->middlewares.push_back(error_route);
         
-        if (this->routes.find(request.path) != this->routes.end() &&
-            this->routes[request.path].find(request.method) != this->routes[request.path].end()) {
-            this->routes[request.path][request.method](request, response);
-            continue;
-        }
-        
-        std::string public_path = "./public" + request.path;
-        if (request.path == "/")
-            public_path = "./public/index.html";
-        std::ifstream file(public_path);
-        if (request.method == HTTPMethod::GET && file.good()) {
-            response.render(file);
-            file.close();
-        } else {
-            // Still not found, send 404
-            std::cerr << client << ": route not found" << std::endl;
-            response.send("<h3>404 Not Found</h3>");
-        }
+        std::cout << "-- Midd --" << std::endl;
+        this->current_midd = 0;
+        this->nextMidd();
+        std::cout << "-- End of Midd --" << std::endl;
 
         if (buffer.find("Connection: close") != std::string::npos) {
             // If the client sends a request with "Connection: close", close the connection
