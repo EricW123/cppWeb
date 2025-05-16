@@ -238,7 +238,7 @@ middleware_func_t Webber::getNextMidd() {
     return this->middlewares[this->current_midd++];
 }
 
-void Webber::default_midds() {
+void Webber::setup_midds() {
     for (middleware_func_t router : this->routers) {
         this->middlewares.push_back(router);
     }
@@ -295,9 +295,7 @@ void Webber::start_client(int client) {
         this->request = Request(buffer);
         this->response = Response(client);
 
-        this->default_midds();
-
-        
+        this->setup_midds();
         
         std::cout << "-- Midd --" << std::endl;
         this->current_midd = 0;

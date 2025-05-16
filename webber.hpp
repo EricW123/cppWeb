@@ -81,7 +81,7 @@ namespace webber {
 
             void start_server(int port);
             void start_client(int client);
-            void default_midds(void);
+            void setup_midds(void);
             void nextMidd(void);
             void runMidd();
             middleware_func_t getNextMidd(void);
