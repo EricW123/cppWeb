@@ -66,7 +66,7 @@ Request::Request(std::string request) {
         if (line.empty()) { is_header = false; continue; }
 
         if (is_header) {
-            size_t pos = line.find(':');
+            ssize_t pos = line.find(':');
             if (pos != std::string::npos) {
                 std::string key = line.substr(0, pos);
                 std::string value = line.substr(pos + 1);
@@ -157,6 +157,19 @@ void Response::render(const std::string filename, std::string content_type) {
     this->render(file_stream, content_type);
 }
 
+void Response::set(const std::string name, std::string value) {
+    this->attributes[name] = value;
+}
+
+std::string Response::get(const std::string name) {
+    if (this->attributes.find(name) == this->attributes.end()) {
+        return "none";
+    } else {
+        return this->attributes[name];
+    }
+}
+
+
 
 Webber::Webber() {
     // Constructor
@@ -187,7 +200,7 @@ void Webber::get(const std::string path, router_func_t callback) {
             if (next) next();
         }
     };
-    this->middlewares.push_back(mw);
+    this->routers.push_back(mw);
 }
 
 void Webber::post(const std::string path, router_func_t callback) {
@@ -200,7 +213,7 @@ void Webber::post(const std::string path, router_func_t callback) {
             if (next) next();
         }
     };
-    this->middlewares.push_back(mw);
+    this->routers.push_back(mw);
 }
 
 void Webber::nextMidd() {
@@ -223,6 +236,40 @@ middleware_func_t Webber::getNextMidd() {
     if (this->middlewares.size() == 0) return nullptr;
     if (this->current_midd >= this->middlewares.size()) return nullptr;
     return this->middlewares[this->current_midd++];
+}
+
+void Webber::default_midds() {
+    for (middleware_func_t router : this->routers) {
+        this->middlewares.push_back(router);
+    }
+
+    middleware_func_t default_route = [](Request& req, Response& res, vvfunc_t next) {
+        std::string public_path = "./public" + req.path;
+        if (req.path == "/")
+            public_path = "./public/index.html";
+        std::cout << "Public path: " << public_path << std::endl;
+        std::ifstream file(public_path);
+        if (req.method == HTTPMethod::GET && file.good()) {
+            if (req.path.find(".css") != std::string::npos) {
+                res.render(file, "text/css");
+            } else if (req.path.find(".js") != std::string::npos) {
+                res.render(file, "text/javascript");
+            } else if (req.path.find(".html") != std::string::npos) {
+                res.render(file, "text/html");
+            } else {
+                res.render(file);
+            }
+            file.close();
+        } else {
+            if (next) next();
+        }
+    };
+    this->middlewares.push_back(default_route);
+
+    middleware_func_t error_route = [](Request& req, Response& res, vvfunc_t next) {
+        res.send("<h3>404 Not Found</h3>");
+    };
+    this->middlewares.push_back(error_route);
 }
 
 void Webber::start_client(int client) {
@@ -248,33 +295,9 @@ void Webber::start_client(int client) {
         this->request = Request(buffer);
         this->response = Response(client);
 
-        middleware_func_t default_route = [](Request& req, Response& res, vvfunc_t next) {
-            std::string public_path = "./public" + req.path;
-            if (req.path == "/")
-                public_path = "./public/index.html";
-            std::cout << "Public path: " << public_path << std::endl;
-            std::ifstream file(public_path);
-            if (req.method == HTTPMethod::GET && file.good()) {
-                if (req.path.find(".css") != std::string::npos) {
-                    res.render(file, "text/css");
-                } else if (req.path.find(".js") != std::string::npos) {
-                    res.render(file, "text/javascript");
-                } else if (req.path.find(".html") != std::string::npos) {
-                    res.render(file, "text/html");
-                } else {
-                    res.render(file);
-                }
-                file.close();
-            } else {
-                if (next) next();
-            }
-        };
-        this->middlewares.push_back(default_route);
+        this->default_midds();
 
-        middleware_func_t error_route = [](Request& req, Response& res, vvfunc_t next) {
-            res.send("<h3>404 Not Found</h3>");
-        };
-        this->middlewares.push_back(error_route);
+        
         
         std::cout << "-- Midd --" << std::endl;
         this->current_midd = 0;
@@ -327,8 +350,12 @@ void Webber::start_server(int port) {
 }
 
 void Webber::listen(int port) {
+    this->port = port;
+}
+
+void Webber::run() {
     // Listen method
-    std::thread server_t(&Webber::start_server, this, port);
+    std::thread server_t(&Webber::start_server, this, this->port);
     server_t.join();
 
     close(this->sock);

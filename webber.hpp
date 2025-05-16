@@ -47,8 +47,12 @@ namespace webber {
             void send(const std::string data, std::string content_type = "text/html");
             void render(const std::string filename, std::string content_type = "text/html");
             void render(std::ifstream& file, std::string content_type = "text/html");
+            
+            void set(const std::string name, std::string value);
+            std::string get(const std::string name);
         private:
             int client_fd;
+            std::unordered_map<std::string, std::string> attributes;
     };
 
     using vvfunc_t = std::function<void()>;
@@ -63,23 +67,23 @@ namespace webber {
             void get(const std::string path, router_func_t callback);
             void post(const std::string path, router_func_t callback);
             void listen(int port);
-
-            void runMidd();
+            void run();
 
         private:
             int sock;
+            int port;
             struct ::sockaddr_in server;
-            std::unordered_map<std::string,
-                std::unordered_map<HTTPMethod, middleware_func_t>> routes;
             Request request = Request("");
             Response response = Response(0);
+            std::vector<middleware_func_t> routers;
             std::vector<middleware_func_t> middlewares;
-            int temp = 0;
             size_t current_midd = 0;
 
             void start_server(int port);
             void start_client(int client);
+            void default_midds(void);
             void nextMidd(void);
+            void runMidd();
             middleware_func_t getNextMidd(void);
     };
 }
