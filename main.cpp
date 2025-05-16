@@ -4,11 +4,6 @@
 #include "webber.hpp"
 
 
-using Req = webber::Request;
-using Res = webber::Response;
-using Next = webber::vvfunc_t;
-using MW = webber::middleware_func_t;
-
 int main(int argc, char* argv[]) {
     webber::Webber app = webber::Webber();
 
@@ -26,13 +21,13 @@ int main(int argc, char* argv[]) {
     });
 
 
-    MW logger = [&](Req& req, Res& res, Next next) {
+    MiddWare logger = [&](Req& req, Res& res, Next next) {
         next();
         std::cout << "Time used: " << res.get("X-Response-Time") << "ms" << std::endl;
     };
     app.use(logger);
 
-    MW timer = [&](Req& req, Res& res, Next next) {
+    MiddWare timer = [&](Req& req, Res& res, Next next) {
         std::clock_t start = std::clock();
         next();
         std::clock_t end = std::clock();

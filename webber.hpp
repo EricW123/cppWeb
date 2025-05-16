@@ -88,4 +88,9 @@ namespace webber {
     };
 }
 
+using Req = webber::Request;
+using Res = webber::Response;
+using Next = webber::vvfunc_t;
+using MiddWare = webber::middleware_func_t;
+
 #endif
