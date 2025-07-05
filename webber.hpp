@@ -63,10 +63,10 @@ namespace webber {
         public:
             Webber();
             ~Webber();
-            void use(middleware_func_t func);
-            void get(const std::string path, router_func_t callback);
-            void post(const std::string path, router_func_t callback);
-            void listen(int port);
+            Webber& use(middleware_func_t func);
+            Webber& get(const std::string path, router_func_t callback);
+            Webber& post(const std::string path, router_func_t callback);
+            Webber& listen(int port);
             void run();
 
         private:
@@ -91,6 +91,7 @@ namespace webber {
 using Req = webber::Request;
 using Res = webber::Response;
 using Next = webber::vvfunc_t;
+using Router = webber::router_func_t;
 using MiddWare = webber::middleware_func_t;
 
 #endif

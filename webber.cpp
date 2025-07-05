@@ -190,7 +190,7 @@ Webber::~Webber() {
     // Destructor
 }
 
-void Webber::get(const std::string path, router_func_t callback) {
+Webber& Webber::get(const std::string path, router_func_t callback) {
     // Get method
     middleware_func_t mw = [path, callback](Request& req, Response& res, vvfunc_t next) {
         if (req.method == HTTPMethod::GET && req.path == path) {
@@ -201,9 +201,10 @@ void Webber::get(const std::string path, router_func_t callback) {
         }
     };
     this->routers.push_back(mw);
+    return *this;
 }
 
-void Webber::post(const std::string path, router_func_t callback) {
+Webber& Webber::post(const std::string path, router_func_t callback) {
     // Post method
     middleware_func_t mw = [path, callback](Request& req, Response& res, vvfunc_t next) {
         if (req.method == HTTPMethod::POST && req.path == path) {
@@ -214,6 +215,7 @@ void Webber::post(const std::string path, router_func_t callback) {
         }
     };
     this->routers.push_back(mw);
+    return *this;
 }
 
 void Webber::nextMidd() {
@@ -222,14 +224,9 @@ void Webber::nextMidd() {
     mw(this->request, this->response, [this]() { this->nextMidd(); });
 }
 
-void Webber::use(middleware_func_t middleware) {
-    // TODO: app.use() register middlewares to front part
-    // app.get() register to second part
-    // other default handlers register to last part
-    // (req,res) |->app.use()->|->app.get()->|->default routers->|->404 Not Found |
-    // but user should be able to use app.use() and app.get() at any order
-    // currently the order of the middlewares is not guaranteed yet.
+Webber& Webber::use(middleware_func_t middleware) {
     this->middlewares.push_back(middleware);
+    return *this;
 };
 
 middleware_func_t Webber::getNextMidd() {
@@ -347,8 +344,9 @@ void Webber::start_server(int port) {
     }
 }
 
-void Webber::listen(int port) {
+Webber& Webber::listen(int port) {
     this->port = port;
+    return *this;
 }
 
 void Webber::run() {
